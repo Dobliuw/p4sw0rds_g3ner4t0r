@@ -23,6 +23,7 @@ def _variants_for_char(ch: str):
 # ======================================================
 
 def mutate_leet(password: str,
+                enable: bool,
                 policy: str = "max",                  # "max" | "full" | "exact"
                 max_depth: Optional[int] = 2,         # Used if policy == "max"
                 exact_depth: Optional[int] = None     # Used if policy == "exact"
@@ -43,6 +44,8 @@ def mutate_leet(password: str,
     """
     # Yield original password
     yield password
+    if not enable:
+        return
 
     # Find replaceable positions and their variants
     positions = []
@@ -81,6 +84,8 @@ def mutate_leet(password: str,
                 leet_password = list(password)
                 for idx, new_ch in zip(idxs, repl_tuple):
                     leet_password[idx] = new_ch
+
+                yield ''.join(leet_password)
 
 
 # ======================================================
@@ -122,7 +127,7 @@ def mutate_case(password: str,
                 yield alternated_password 
         return
 
-    # --- mode == "toggle": combinatorio controlado ---
+    # --- mode == "toggle": controlled alternate ---
     positions = [i for i, ch in enumerate(password) if ch.isalpha()]
     k = len(positions)
     if k == 0:
@@ -165,6 +170,82 @@ def mutate_reverse(password: str, enable: bool) -> Iterator[str]:
         rev_password = password[::-1]
         if rev_password != password:
             yield rev_password 
+
+
+ 
+# ======================================================
+#                  TYPO SWAPS
+# ======================================================
+def mutate_typoswap(password: str, enable: bool, max_swaps: int = 1) -> Iterator[str]:
+    """
+    Generate variations changing pair continious (Transposition)
+    - 'max_swaps=1' -> Generate all varianst with just swap.
+    - 'max_swaps=>1' -> Generall disjpoint swap combinations (No overlap)
+    """
+    # always original first
+    yield password
+    if not enable or len(password) < 2:
+        return
+
+    n = len(password)
+    positions = list(range(n - 1))  # contiguous pairs are (i, i+1)
+
+    max_d = min(max_swaps, len(positions))
+    for depth in range(1, max_d + 1):
+        for combo in itertools.combinations(positions, depth):
+            # ensure disjoint swaps: no adjacent indices in the combo
+            # e.g., (2,3) invalid because both touch index 3
+            if any(abs(i - j) == 1 for i, j in itertools.combinations(combo, 2)):
+                continue
+
+            lst = list(password)
+            # apply swaps in ascending order (safe for disjoint pairs)
+            for i in sorted(combo):
+                lst[i], lst[i + 1] = lst[i + 1], lst[i]
+            variant = ''.join(lst)
+            if variant != password:
+                yield variant
+
+
+def mutate_pipeline(passwords: Iterator[str],
+                    # Leet Speak
+                    leet: bool = False, 
+                    leet_policy: str = "max",
+                    leet_max_depth: Optional[int] = 2,
+                    leet_exact_depth: Optional[int] = None,
+                    # AlUp
+                    alup: bool = False,
+                    alup_mode: str = "patterns",
+                    alup_max_depth: Optional[int] = 2,
+                    alup_exact_depth: Optional[int] = None,
+                    # Reverse
+                    reverse: bool = False,
+                    # Typo Swap
+                    typoswap: bool = False,
+                    typo_max_swaps: int = 1) -> Iterator[str]:
+    """
+    Compose all mutations in controlled order:
+        reverse -> typo-swap -> leett -> case
+
+    - Each mutation function yields the original password.
+    - We use 'local_seen' for main password to handle duplicated wihtout full the memory.
+    """
+    for password in passwords:
+        local_seen = set()
+
+        for v1 in mutate_reverse(password, enable=reverse):
+            for v2 in mutate_typoswap(v1, enable=typoswap, max_swaps=typo_max_swaps):
+                for v3 in mutate_leet(v2, enable=leet,
+                                      policy=leet_policy,
+                                      max_depth=leet_max_depth,
+                                      exact_depth=leet_exact_depth):
+                    for v4 in mutate_case(v3, enable=alup,
+                                          mode=alup_mode,
+                                          max_depth=alup_max_depth,
+                                          exact_depth=alup_exact_depth):
+                        if v4 not in local_seen:
+                            local_seen.add(v4)
+                            yield v4
 
 
 
